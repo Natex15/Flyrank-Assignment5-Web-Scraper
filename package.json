@@ -11,6 +11,7 @@
     "dev": "node src/index.js"
   },
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "zod": "^4.6.5"
   }
 }

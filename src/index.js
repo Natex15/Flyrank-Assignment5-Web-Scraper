@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
+import { z } from 'zod';
 
 const target_url = "https://books.toscrape.com/catalogue/page-1.html";
 const user_agent_header = "FlyrankInternship-A9/1.0 (+https://github.com/Natex15/Flyrank-Assignment5-Web-Scraper)";
@@ -74,8 +75,32 @@ function parseBookDetail(content, metadata) {
     };
 }
 
+function cleanBookRecord(raw) {
+    const numericString = raw.price_text.replace(/[^0-9.]/g, '');
+    const price_gbp = parseFloat(numericString);
+
+    return {
+        ...raw,
+        price_gbp: Number.isNaN(price_gbp) ? null : price_gbp,
+    };
+}
+
 
 async function run() {
+    const BookSchema = z.object({
+        title: z.string().min(1),
+        product_url: z.string().url().startsWith('https://'),
+        price_text: z.string().min(1),
+        price_gbp: z.number().positive(),
+        availability_text: z.string().min(1),
+        rating_text: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        source_page: z.string().url().startsWith('https://'),
+        fetched_at: z.string().datetime(),
+    });
+
+
+
     let currentPage = target_url;
     const bookLinks = [];
     for (let i = 0; i < cataloguePages; i++) {
@@ -109,6 +134,41 @@ async function run() {
         rawRecords.push(record);
     }
     console.log(JSON.stringify(rawRecords[0], null, 2))
+
+    const validRecords = [];
+    const errorRecords = [];
+
+    for (const raw of rawRecords) {
+        const cleaned = cleanBookRecord(raw);
+        const validation = BookSchema.safeParse(cleaned);
+
+        if (validation.success) {
+            validRecords.push(validation.data);
+        } else {
+            errorRecords.push({
+                record: cleaned,
+                errors: validation.error.issues,
+            });
+        }
+    }
+    const outputDir = path.resolve('output');
+    await fs.mkdir(outputDir, { recursive: true });
+
+    await fs.writeFile(
+        path.join(outputDir, 'books.json'),
+        JSON.stringify(validRecords, null, 2),
+        'utf-8'
+    );
+
+    if (errorRecords.length > 0) {
+        await fs.writeFile(
+            path.join(outputDir, 'errors.json'),
+            JSON.stringify(errorRecords, null, 2),
+            'utf-8'
+        );
+    }
+
+
     console.log(`catalogue_pages=${cataloguePages} , discovered=${bookLinks.length} , unique_urls=${uniqueBooks.length}`);
 
 }
