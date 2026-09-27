@@ -9,5 +9,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0"
   }
 }
