@@ -44,7 +44,34 @@ async function getPage(url) {
         await fs.writeFile(cache_path, content, 'utf-8');
         console.log(`FETCH - Size: ${Buffer.byteLength(content)} bytes`);
     }
-    return content;
+    const fetched_at = new Date().toISOString()
+    return { content, fetched_at };
+}
+
+function parseBookDetail(content, metadata) {
+    const $ = cheerio.load(content);
+    const product = $('article.product_page');
+    const productMain = product.find('.product_main');
+    const title = productMain.find('h1').text().trim();
+    const price_text = productMain.find('.price_color').text().trim();
+    const availability_text = productMain.find('.availability').text().replace(/\s+/g, ' ').trim();
+    const starClass = productMain.find('.star-rating').attr('class') || '';
+    const rating_text = starClass.split(/\s+/).find(c => c && c !== 'star-rating') || null;
+    const descEl = product.find('#product_description').next('p');
+    const description = descEl.length > 0 && descEl.text().trim() !== ''
+        ? descEl.text().trim()
+        : null;
+
+    return {
+        title,
+        product_url: metadata.product_url,
+        price_text,
+        availability_text,
+        rating_text,
+        description,
+        source_page: metadata.source_page,
+        fetched_at: metadata.fetched_at
+    };
 }
 
 
@@ -52,19 +79,37 @@ async function run() {
     let currentPage = target_url;
     const bookLinks = [];
     for (let i = 0; i < cataloguePages; i++) {
-        const data = await getPage(currentPage);
-        const $ = cheerio.load(data);
+        const { content, fetched_at } = await getPage(currentPage);
+        const $ = cheerio.load(content);
         $('article.product_pod h3 a').each((index, element) => {
             const relativeHref = $(element).attr('href');
             const absoluteUrl = new URL(relativeHref, currentPage).href;
-            bookLinks.push(absoluteUrl);
+            bookLinks.push({ product_url: absoluteUrl, source_page: currentPage });
         });
         const relativeHref = $('li.next a').attr('href');
         if (!relativeHref) break; // Stop early if there are no more pages
         currentPage = new URL(relativeHref, currentPage).href;
     }
-    const unique_urls = new Set(bookLinks);
-    console.log(`catalogue_pages=${cataloguePages} , discovered=${bookLinks.length} , unique_urls=${unique_urls.size}`);
+    const uniqueBooksMap = new Map();
+    for (const book of bookLinks) {
+        if (!uniqueBooksMap.has(book.product_url)) {
+            uniqueBooksMap.set(book.product_url, book);
+        }
+    }
+    console.log(`discovered=${bookLinks.length}, unique_urls=${uniqueBooksMap.size}`);
+    const uniqueBooks = Array.from(uniqueBooksMap.values());
+    const rawRecords = [];
+    for (const book of uniqueBooks) {
+        const { content, fetched_at } = await getPage(book.product_url);
+        const record = parseBookDetail(content, {
+            product_url: book.product_url,
+            source_page: book.source_page,
+            fetched_at: fetched_at
+        })
+        rawRecords.push(record);
+    }
+    console.log(JSON.stringify(rawRecords[0], null, 2))
+    console.log(`catalogue_pages=${cataloguePages} , discovered=${bookLinks.length} , unique_urls=${uniqueBooks.length}`);
 
 }
 
